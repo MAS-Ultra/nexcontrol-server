@@ -9,9 +9,38 @@ const { ROLES, EVENTS } = require('../config/constants');
  */
 module.exports = (io, socket) => {
     socket.on(EVENTS.JOIN_ROOM, ({ roomId: deviceId, role }) => {
-        // 1. Validate Input
-        if (!isValidDeviceId(deviceId)) {
-            log('error', `Rejected Join: Invalid DeviceID Format (${deviceId})`);
+        let finalRoomId = deviceId;
+
+        // --- GLOBAL AUTO-CONNECT LOGIC ---
+        // If the user wants devices to automatically find each other,
+        // we can use a "Lobby" system or simply default to the first available room.
+        // For this specific request: "Check if a room exists, if so join it, else create one"
+
+        const allRooms = roomService.getAllRooms();
+        let existingRoomId = null;
+
+        // Look for any active room that needs a partner
+        for (const [id, room] of allRooms.entries()) {
+            if (role === ROLES.ASSISTANT && !room.assistant) {
+                existingRoomId = id;
+                break;
+            }
+            if (role === ROLES.MANAGER && !room.manager) {
+                existingRoomId = id;
+                break;
+            }
+        }
+
+        if (existingRoomId) {
+            finalRoomId = existingRoomId;
+            log('info', `Auto-Linking ${role} to existing room: ${finalRoomId}`);
+        } else {
+            log('info', `No existing partner room found for ${role}. Using/Creating: ${finalRoomId}`);
+        }
+
+        // 1. Validate Input (Using the potentially new finalRoomId)
+        if (!isValidDeviceId(finalRoomId)) {
+            log('error', `Rejected Join: Invalid DeviceID Format (${finalRoomId})`);
             return socket.disconnect(true);
         }
         if (role !== ROLES.MANAGER && role !== ROLES.ASSISTANT) {
@@ -19,12 +48,12 @@ module.exports = (io, socket) => {
             return socket.disconnect(true);
         }
 
-        const room = roomService.getOrCreateRoom(deviceId);
+        const room = roomService.getOrCreateRoom(finalRoomId);
 
         // 2. Handle Duplicate Sessions
         if (role === ROLES.ASSISTANT) {
             if (room.assistant && room.assistant.socketId !== socket.id) {
-                log('warn', 'Assistant Collision: Evicting stale session', deviceId);
+                log('warn', 'Assistant Collision: Evicting stale session', finalRoomId);
                 io.sockets.sockets.get(room.assistant.socketId)?.disconnect(true);
             }
             room.assistant = { socketId: socket.id, startTime: Date.now(), lastSeen: Date.now() };
@@ -32,26 +61,26 @@ module.exports = (io, socket) => {
             room.status.lastSeen = Date.now();
         } else {
             if (room.manager && room.manager.socketId !== socket.id) {
-                log('warn', 'Manager Collision: Evicting stale session', deviceId);
+                log('warn', 'Manager Collision: Evicting stale session', finalRoomId);
                 io.sockets.sockets.get(room.manager.socketId)?.disconnect(true);
             }
             room.manager = { socketId: socket.id, startTime: Date.now() };
         }
 
         // 3. Assign Context
-        socket.deviceId = deviceId;
+        socket.deviceId = finalRoomId;
         socket.role = role;
-        socket.join(deviceId);
+        socket.join(finalRoomId);
 
-        log('success', `${role.toUpperCase()} Synchronized`, deviceId);
+        log('success', `${role.toUpperCase()} Synchronized`, finalRoomId);
 
         // 4. Notify Partner
-        socket.to(deviceId).emit(EVENTS.PARTNER_JOINED, { role });
+        socket.to(finalRoomId).emit(EVENTS.PARTNER_JOINED, { role });
 
         // 5. Handshake if Ready
         if (room.assistant && room.manager) {
-            io.to(deviceId).emit(EVENTS.ROOM_READY, { roomId: deviceId });
-            log('success', 'Handshake Complete', deviceId);
+            io.to(finalRoomId).emit(EVENTS.ROOM_READY, { roomId: finalRoomId });
+            log('success', 'Handshake Complete', finalRoomId);
         }
 
         // 6. Sync Status for Manager
