@@ -21,11 +21,14 @@ module.exports = (io, socket) => {
 
         // Look for any active room that needs a partner
         for (const [id, room] of allRooms.entries()) {
-            if (role === ROLES.ASSISTANT && !room.assistant) {
+            // CRITICAL FIX: Ensure we don't "Auto-Link" to a room where we are already the only member!
+            // If I am an Assistant, I only want to join a room that has a MANAGER and NO Assistant.
+            if (role === ROLES.ASSISTANT && room.manager && !room.assistant) {
                 existingRoomId = id;
                 break;
             }
-            if (role === ROLES.MANAGER && !room.manager) {
+            // If I am a Manager, I only want to join a room that has an ASSISTANT and NO Manager.
+            if (role === ROLES.MANAGER && room.assistant && !room.manager) {
                 existingRoomId = id;
                 break;
             }
