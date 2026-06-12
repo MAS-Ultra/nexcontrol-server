@@ -1,41 +1,109 @@
 const roomService = require('./roomService');
 
 /**
- * DEVICE STATUS AND PRESENCE SERVICE
+ * NEXCONTROL STATUS SERVICE
+ * Production Optimized
  */
+
 class StatusService {
-    updateAssistantStatus(deviceId, statusData) {
-        const room = roomService.getOrCreateRoom(deviceId);
+
+    constructor() {
+        this.allowedTypes = new Set([
+            'apps',
+            'files',
+            'location'
+        ]);
+    }
+
+    updateAssistantStatus(deviceId, statusData = {}) {
+
+        const room =
+            roomService.getOrCreateRoom(deviceId);
+
+        const now = Date.now();
+
         room.status = {
             ...room.status,
             ...statusData,
             status: 'online',
-            lastSeen: Date.now()
+            lastSeen: now
         };
+
+        room.lastActivity = now;
+
         return room.status;
     }
 
-    setAssistantOffline(deviceId, reason) {
-        const room = roomService.getRoom(deviceId);
-        if (room) {
-            room.assistant = null;
-            room.status.status = 'offline';
-            room.status.lastSeen = Date.now();
-            room.status.disconnectReason = reason;
-            return room.status;
+    setAssistantOffline(deviceId, reason = 'unknown') {
+
+        const room =
+            roomService.getRoom(deviceId);
+
+        if (!room) {
+            return null;
         }
-        return null;
+
+        const now = Date.now();
+
+        room.assistant = null;
+
+        room.status = {
+            ...room.status,
+            status: 'offline',
+            lastSeen: now,
+            disconnectReason: reason
+        };
+
+        room.lastActivity = now;
+
+        return room.status;
     }
 
     updateProData(deviceId, type, data) {
-        const room = roomService.getOrCreateRoom(deviceId);
-        room.proData[type] = data;
-        room.lastActivity = Date.now();
+
+        if (!this.allowedTypes.has(type)) {
+            return false;
+        }
+
+        const room =
+            roomService.getOrCreateRoom(deviceId);
+
+        const now = Date.now();
+
+        room.proData[type] = {
+            data,
+            updatedAt: now
+        };
+
+        room.lastActivity = now;
+
+        return true;
     }
 
     getProData(deviceId, type) {
-        const room = roomService.getRoom(deviceId);
-        return room ? room.proData[type] : null;
+
+        if (!this.allowedTypes.has(type)) {
+            return null;
+        }
+
+        const room =
+            roomService.getRoom(deviceId);
+
+        if (!room) {
+            return null;
+        }
+
+        return room.proData[type];
+    }
+
+    getAssistantStatus(deviceId) {
+
+        const room =
+            roomService.getRoom(deviceId);
+
+        return room
+            ? room.status
+            : null;
     }
 }
 

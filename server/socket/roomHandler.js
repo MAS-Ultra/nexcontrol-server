@@ -4,110 +4,222 @@ const statusService = require('../services/statusService');
 const { isValidDeviceId } = require('../utils/deviceValidator');
 const { ROLES, EVENTS } = require('../config/constants');
 
-/**
- * ROOM JOIN AND COLLISION LOGIC
- */
 module.exports = (io, socket) => {
-    socket.on(EVENTS.JOIN_ROOM, ({ roomId: deviceId, role }) => {
-        let finalRoomId = deviceId;
 
-        // --- GLOBAL AUTO-CONNECT LOGIC ---
-        // If the user wants devices to automatically find each other,
-        // we can use a "Lobby" system or simply default to the first available room.
-        // For this specific request: "Check if a room exists, if so join it, else create one"
+    socket.on(EVENTS.JOIN_ROOM, (payload = {}) => {
 
-        const allRooms = roomService.getAllRooms();
-        let existingRoomId = null;
+        try {
 
-        // Look for any active room that needs a partner
-        for (const [id, room] of allRooms.entries()) {
-            // CRITICAL FIX: Ensure we don't "Auto-Link" to a room where we are already the only member!
-            // If I am an Assistant, I only want to join a room that has a MANAGER and NO Assistant.
-            if (role === ROLES.ASSISTANT && room.manager && !room.assistant) {
-                existingRoomId = id;
-                break;
+            let {
+                roomId: deviceId,
+                role
+            } = payload;
+
+            if (
+                !deviceId ||
+                typeof deviceId !== 'string'
+            ) {
+                return socket.disconnect(true);
             }
-            // If I am a Manager, I only want to join a room that has an ASSISTANT and NO Manager.
-            if (role === ROLES.MANAGER && room.assistant && !room.manager) {
-                existingRoomId = id;
-                break;
+
+            if (
+                role !== ROLES.MANAGER &&
+                role !== ROLES.ASSISTANT
+            ) {
+                return socket.disconnect(true);
             }
-        }
 
-        if (existingRoomId) {
-            finalRoomId = existingRoomId;
-            log('info', `Auto-Linking ${role} to existing room: ${finalRoomId}`);
-        } else {
-            log('info', `No existing partner room found for ${role}. Using/Creating: ${finalRoomId}`);
-        }
-
-        // 1. Validate Input (Using the potentially new finalRoomId)
-        if (!isValidDeviceId(finalRoomId)) {
-            log('error', `Rejected Join: Invalid DeviceID Format (${finalRoomId})`);
-            return socket.disconnect(true);
-        }
-        if (role !== ROLES.MANAGER && role !== ROLES.ASSISTANT) {
-            log('error', 'Rejected Join: Invalid Role', deviceId);
-            return socket.disconnect(true);
-        }
-
-        const room = roomService.getOrCreateRoom(finalRoomId);
-
-        // 2. Handle Duplicate Sessions
-        if (role === ROLES.ASSISTANT) {
-            if (room.assistant && room.assistant.socketId !== socket.id) {
-                log('warn', 'Assistant Collision: Evicting stale session', finalRoomId);
-                io.sockets.sockets.get(room.assistant.socketId)?.disconnect(true);
+            if (!isValidDeviceId(deviceId)) {
+                return socket.disconnect(true);
             }
-            room.assistant = { socketId: socket.id, startTime: Date.now(), lastSeen: Date.now() };
-            room.status.status = 'online';
-            room.status.lastSeen = Date.now();
-        } else {
-            if (room.manager && room.manager.socketId !== socket.id) {
-                log('warn', 'Manager Collision: Evicting stale session', finalRoomId);
-                io.sockets.sockets.get(room.manager.socketId)?.disconnect(true);
+
+            const room =
+                roomService.getOrCreateRoom(deviceId);
+
+            const now = Date.now();
+
+            // Remove old session
+            if (role === ROLES.ASSISTANT) {
+
+                if (
+                    room.assistant &&
+                    room.assistant.socketId !== socket.id
+                ) {
+
+                    io.sockets.sockets
+                        .get(room.assistant.socketId)
+                        ?.disconnect(true);
+
+                    log(
+                        'warn',
+                        'Old Assistant Removed',
+                        deviceId
+                    );
+                }
+
+                room.assistant = {
+                    socketId: socket.id,
+                    startTime: now,
+                    lastSeen: now
+                };
+
+                room.status.status = 'online';
+                room.status.lastSeen = now;
+
+            } else {
+
+                if (
+                    room.manager &&
+                    room.manager.socketId !== socket.id
+                ) {
+
+                    io.sockets.sockets
+                        .get(room.manager.socketId)
+                        ?.disconnect(true);
+
+                    log(
+                        'warn',
+                        'Old Manager Removed',
+                        deviceId
+                    );
+                }
+
+                room.manager = {
+                    socketId: socket.id,
+                    startTime: now
+                };
             }
-            room.manager = { socketId: socket.id, startTime: Date.now() };
+
+            room.lastActivity = now;
+
+            socket.deviceId = deviceId;
+            socket.role = role;
+
+            socket.join(deviceId);
+
+            log(
+                'info',
+                `${role} joined room`,
+                deviceId
+            );
+
+            socket.to(deviceId)
+                .emit(
+                    EVENTS.PARTNER_JOINED,
+                    { role }
+                );
+
+            if (
+                room.assistant &&
+                room.manager
+            ) {
+
+                io.to(deviceId)
+                    .emit(
+                        EVENTS.ROOM_READY,
+                        {
+                            roomId: deviceId
+                        }
+                    );
+
+                log(
+                    'success',
+                    'Room Ready',
+                    deviceId
+                );
+            }
+
+            if (
+                role === ROLES.MANAGER
+            ) {
+
+                socket.emit(
+                    EVENTS.ASSISTANT_STATUS,
+                    room.status
+                );
+            }
+
+        } catch (err) {
+
+            log(
+                'error',
+                `Join Error: ${err.message}`
+            );
+
+            socket.disconnect(true);
         }
 
-        // 3. Assign Context
-        socket.deviceId = finalRoomId;
-        socket.role = role;
-        socket.join(finalRoomId);
-
-        log('success', `${role.toUpperCase()} Synchronized`, finalRoomId);
-
-        // 4. Notify Partner
-        socket.to(finalRoomId).emit(EVENTS.PARTNER_JOINED, { role });
-
-        // 5. Handshake if Ready
-        if (room.assistant && room.manager) {
-            io.to(finalRoomId).emit(EVENTS.ROOM_READY, { roomId: finalRoomId });
-            log('success', 'Handshake Complete', finalRoomId);
-        }
-
-        // 6. Sync Status for Manager
-        if (role === ROLES.MANAGER) {
-            socket.emit(EVENTS.ASSISTANT_STATUS, room.status);
-        }
     });
 
     socket.on('disconnect', (reason) => {
-        const { deviceId, role } = socket;
-        if (!deviceId) return;
 
-        log('warn', `Session Terminated (${reason})`, deviceId);
+        try {
 
-        if (role === ROLES.ASSISTANT) {
-            const status = statusService.setAssistantOffline(deviceId, reason);
-            if (status) {
-                io.to(deviceId).emit(EVENTS.ASSISTANT_STATUS, status);
+            const {
+                deviceId,
+                role
+            } = socket;
+
+            if (!deviceId) {
+                return;
             }
-        } else {
-            const room = roomService.getRoom(deviceId);
-            if (room) room.manager = null;
+
+            const room =
+                roomService.getRoom(deviceId);
+
+            if (!room) {
+                return;
+            }
+
+            log(
+                'warn',
+                `Disconnected (${reason})`,
+                deviceId
+            );
+
+            if (
+                role === ROLES.ASSISTANT
+            ) {
+
+                const status =
+                    statusService
+                        .setAssistantOffline(
+                            deviceId,
+                            reason
+                        );
+
+                if (status) {
+
+                    io.to(deviceId)
+                        .emit(
+                            EVENTS.ASSISTANT_STATUS,
+                            status
+                        );
+                }
+
+            } else {
+
+                room.manager = null;
+            }
+
+            socket.to(deviceId)
+                .emit(
+                    EVENTS.PARTNER_LEFT,
+                    {
+                        role,
+                        reason
+                    }
+                );
+
+        } catch (err) {
+
+            log(
+                'error',
+                `Disconnect Error: ${err.message}`
+            );
+
         }
 
-        socket.to(deviceId).emit(EVENTS.PARTNER_LEFT, { role, reason });
     });
+
 };

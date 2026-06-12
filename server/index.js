@@ -1,80 +1,190 @@
-/**
- * NEXCONTROL MODULAR RELAY SERVER
- * -----------------------------------------
- * Lead Backend Architect: AI Assistant
- * Status: Production Ready
- */
-
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
 
 const { PORT, VERSION } = require('./config/constants');
+
 const { log } = require('./middleware/logger');
 const { apiLimiter } = require('./middleware/rateLimit');
+
 const { initSocket } = require('./socket/socket');
+
 const roomService = require('./services/roomService');
 const cleanupService = require('./services/cleanupService');
-const { getRoomStats } = require('./utils/helpers');
 
-// Routes
+const {
+    getRoomStats,
+    bytesToMB
+} = require('./utils/helpers');
+
 const appsRoutes = require('./routes/apps.routes');
 const filesRoutes = require('./routes/files.routes');
 const locationRoutes = require('./routes/location.routes');
 
 const app = express();
+
+app.set('trust proxy', 1);
+
 const server = http.createServer(app);
 
-// --- MIDDLEWARE ---
-app.use(helmet());
-app.use(cors({ origin: '*' }));
-app.use(express.json({ limit: '25mb' }));
+/**
+ * SECURITY
+ */
+
+app.use(
+    helmet({
+        crossOriginEmbedderPolicy: false,
+        contentSecurityPolicy: false
+    })
+);
+
+app.use(
+    cors({
+        origin: '*',
+        methods: ['GET', 'POST']
+    })
+);
+
+/**
+ * BODY PARSER
+ */
+
+app.use(
+    express.json({
+        limit: '5mb'
+    })
+);
+
+/**
+ * RATE LIMIT
+ */
+
 app.use('/apps', apiLimiter);
 app.use('/files', apiLimiter);
 app.use('/location', apiLimiter);
 
-// --- ROUTES ---
-app.get('/', (req, res) => {
-    const stats = getRoomStats(roomService.getAllRooms());
-    res.json({
-        status: 'NexControl Modular Server Operational',
-        version: VERSION,
-        uptime: process.uptime(),
-        memory: process.memoryUsage().rss,
-        stats: {
-            ...stats,
-            loadFactor: (stats.managers + stats.assistants) / 1000
-        }
+/**
+ * HEALTH CHECK
+ */
+
+app.get('/health', (req, res) => {
+
+    res.status(200).json({
+        status: 'ok',
+        timestamp: Date.now()
     });
+
 });
+
+/**
+ * DASHBOARD
+ */
+
+app.get('/', (req, res) => {
+
+    const stats =
+        getRoomStats(
+            roomService.getAllRooms()
+        );
+
+    const memory =
+        process.memoryUsage();
+
+    res.json({
+
+        status: 'online',
+
+        version: VERSION,
+
+        uptime: Math.floor(
+            process.uptime()
+        ),
+
+        memory: {
+            rssMB: bytesToMB(memory.rss),
+            heapUsedMB: bytesToMB(memory.heapUsed),
+            heapTotalMB: bytesToMB(memory.heapTotal)
+        },
+
+        stats
+
+    });
+
+});
+
+/**
+ * ROUTES
+ */
 
 app.use('/apps', appsRoutes);
 app.use('/files', filesRoutes);
 app.use('/location', locationRoutes);
 
-// --- INITIALIZATION ---
+/**
+ * SOCKET SERVER
+ */
+
 const io = initSocket(server);
+
+/**
+ * CLEANUP SERVICE
+ */
+
 cleanupService.init(io);
 
-// --- GRACEFUL SHUTDOWN ---
-const shutdown = (signal) => {
-    log('warn', `${signal} received. Closing server...`);
+/**
+ * SHUTDOWN
+ */
+
+function shutdown(signal) {
+
+    log(
+        'warn',
+        `${signal} received`
+    );
+
     server.close(() => {
-        log('success', 'Server closed gracefully');
+
+        log(
+            'success',
+            'Server closed'
+        );
+
         process.exit(0);
     });
-    setTimeout(() => process.exit(1), 10000);
-};
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+    setTimeout(() => {
 
-// --- STARTUP ---
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n🚀 NEXCONTROL MODULAR RELAY v${VERSION}`);
-    console.log(`📡 Status: OPERATIONAL`);
-    console.log(`🔋 Port: ${PORT}`);
-    console.log(`🛡️ Security: ENFORCED`);
-    console.log(`⏱️ Heartbeat: 15s/30s\n`);
-});
+        process.exit(1);
+
+    }, 10000);
+
+}
+
+process.on(
+    'SIGTERM',
+    () => shutdown('SIGTERM')
+);
+
+process.on(
+    'SIGINT',
+    () => shutdown('SIGINT')
+);
+
+/**
+ * START
+ */
+
+server.listen(
+    PORT,
+    '0.0.0.0',
+    () => {
+
+        log(
+            'success',
+            `NexControl v${VERSION} running on ${PORT}`
+        );
+
+    }
+);
