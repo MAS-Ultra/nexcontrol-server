@@ -114,6 +114,30 @@ app.get('/', (req, res) => {
 });
 
 /**
+ * ROOMS DISCOVERY
+ */
+
+app.get('/rooms', (req, res) => {
+    const rooms = roomService.getAllRooms();
+    const discoveryList = [];
+
+    rooms.forEach((room, deviceId) => {
+        if (room.assistant && room.status.status === 'online') {
+            discoveryList.push({
+                roomId: deviceId,
+                lastSeen: room.status.lastSeen,
+                model: room.status.model || 'Unknown Device'
+            });
+        }
+    });
+
+    res.json({
+        rooms: discoveryList,
+        count: discoveryList.length
+    });
+});
+
+/**
  * ROUTES
  */
 
