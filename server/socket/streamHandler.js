@@ -8,6 +8,8 @@ const { log } = require('../middleware/logger');
 
 module.exports = (io, socket) => {
 
+    const FRAME_EXPIRY_MS = 500;
+
     socket.on(EVENTS.CAMERA_FRAME, (data) => {
 
         if (
@@ -18,6 +20,17 @@ module.exports = (io, socket) => {
         }
 
         if (!data) {
+            return;
+        }
+
+        // Drop if no manager in room
+        const room = io.sockets.adapter.rooms.get(socket.deviceId);
+        if (!room || room.size < 2) {
+            return;
+        }
+
+        // Frame expiry if timestamp exists
+        if (data.timestamp && (Date.now() - data.timestamp > FRAME_EXPIRY_MS)) {
             return;
         }
 
@@ -42,6 +55,17 @@ module.exports = (io, socket) => {
             return;
         }
 
+        // Drop if no manager in room
+        const room = io.sockets.adapter.rooms.get(socket.deviceId);
+        if (!room || room.size < 2) {
+            return;
+        }
+
+        // Frame expiry if timestamp exists
+        if (data.timestamp && (Date.now() - data.timestamp > FRAME_EXPIRY_MS)) {
+            return;
+        }
+
         socket.volatile
             .to(socket.deviceId)
             .emit(
@@ -63,8 +87,8 @@ module.exports = (io, socket) => {
             return;
         }
 
-        // Audio shouldn't be volatile
-        socket
+        // Audio should be volatile to prevent clogging the pipe during congestion
+        socket.volatile
             .to(socket.deviceId)
             .emit(
                 EVENTS.AUDIO_CHUNK,
