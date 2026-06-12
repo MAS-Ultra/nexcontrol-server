@@ -74,7 +74,7 @@ module.exports = (io, socket) => {
             }
 
             // Notification relay
-            socket.volatile
+            socket
                 .to(socket.deviceId)
                 .emit(EVENTS.NOTIFICATION, data);
 
