@@ -31,15 +31,15 @@ const initSocket = (server) => {
 
         allowUpgrades: false,
 
-        pingTimeout: 15000,
+        pingTimeout: 30000,
 
-        pingInterval: 5000,
+        pingInterval: 10000,
 
         perMessageDeflate: false,
 
         serveClient: false,
 
-        connectTimeout: 10000
+        connectTimeout: 20000
     });
 
     io.engine.on('connection_error', (err) => {
