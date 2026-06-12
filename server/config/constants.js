@@ -12,7 +12,7 @@ module.exports = {
     MAX_PAYLOAD_SIZE: 2 * 1024 * 1024, // 2MB
 
     // Faster disconnect detection
-    HEARTBEAT_TIMEOUT: 15000,
+    HEARTBEAT_TIMEOUT: 45000,
 
     // Cleanup intervals
     CLEANUP_INTERVAL: 30000,
