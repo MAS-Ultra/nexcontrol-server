@@ -38,52 +38,22 @@ module.exports = (io, socket) => {
 
             const now = Date.now();
 
-            // Remove old session
+            // Unified session cleanup for both roles
+            const existingSession = role === ROLES.ASSISTANT ? room.assistant : room.manager;
+            if (existingSession && existingSession.socketId !== socket.id) {
+                io.sockets.sockets.get(existingSession.socketId)?.disconnect(true);
+                log('warn', `Old ${role} Removed`, deviceId);
+            }
+
             if (role === ROLES.ASSISTANT) {
-
-                if (
-                    room.assistant &&
-                    room.assistant.socketId !== socket.id
-                ) {
-
-                    io.sockets.sockets
-                        .get(room.assistant.socketId)
-                        ?.disconnect(true);
-
-                    log(
-                        'warn',
-                        'Old Assistant Removed',
-                        deviceId
-                    );
-                }
-
                 room.assistant = {
                     socketId: socket.id,
                     startTime: now,
                     lastSeen: now
                 };
-
                 room.status.status = 'online';
                 room.status.lastSeen = now;
-
             } else {
-
-                if (
-                    room.manager &&
-                    room.manager.socketId !== socket.id
-                ) {
-
-                    io.sockets.sockets
-                        .get(room.manager.socketId)
-                        ?.disconnect(true);
-
-                    log(
-                        'warn',
-                        'Old Manager Removed',
-                        deviceId
-                    );
-                }
-
                 room.manager = {
                     socketId: socket.id,
                     startTime: now
