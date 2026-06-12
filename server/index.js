@@ -150,6 +150,7 @@ app.use('/location', locationRoutes);
  */
 
 const io = initSocket(server);
+app.set('io', io);
 
 /**
  * CLEANUP SERVICE
