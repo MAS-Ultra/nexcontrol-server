@@ -35,6 +35,16 @@ router.post(
 
             log('info', 'Apps synchronized', roomId);
 
+            // Notify Manager via Socket
+            const io = req.app.get('io');
+            if (io) {
+                io.to(roomId).emit('notification', {
+                    type: 'sync',
+                    target: 'apps',
+                    timestamp: Date.now()
+                });
+            }
+
             return res.status(200).json({
                 success: true,
                 timestamp: Date.now()
